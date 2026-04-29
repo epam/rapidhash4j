@@ -1,0 +1,3 @@
+[submodule "native/rapidhash"]
+	path = native/rapidhash
+	url = https://github.com/Nicoshev/rapidhash.git
