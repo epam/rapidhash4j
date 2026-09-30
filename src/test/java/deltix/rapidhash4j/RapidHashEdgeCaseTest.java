@@ -1,6 +1,8 @@
 package deltix.rapidhash4j;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.nio.ByteBuffer;
 
@@ -41,6 +43,16 @@ class RapidHashEdgeCaseTest {
     void offsetAtEndThrows() {
         assertThrows(ArrayIndexOutOfBoundsException.class,
                 () -> RapidHash.hash(new byte[10], 10, 1));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"2147483647, 1", "1, 2147483647", "2147483647, 2147483647"})
+    void overflowingRangeThrows(int offset, int length) {
+        byte[] data = new byte[10];
+        assertThrows(ArrayIndexOutOfBoundsException.class,
+                () -> RapidHash.hash(data, offset, length));
+        assertThrows(ArrayIndexOutOfBoundsException.class,
+                () -> RapidHash.hash(data, offset, length, 42L));
     }
 
     @Test

@@ -12,13 +12,9 @@ public final class RapidHash {
 
     private RapidHash() {}
 
-    // --- Native methods (package-private) ---
+    private static native long nativeHash(byte[] data, int offset, int length, long seed);
 
-    static native long nativeHash(byte[] data, int offset, int length, long seed);
-
-    static native long nativeHashDirect(ByteBuffer buffer, int offset, int length, long seed);
-
-    // --- Public API ---
+    private static native long nativeHashDirect(ByteBuffer buffer, int offset, int length, long seed);
 
     public static long hash(byte[] data) {
         if (data == null) throw new NullPointerException("data");
@@ -45,7 +41,9 @@ public final class RapidHash {
     }
 
     public static long hash(ByteBuffer buffer, long seed) {
-        if (buffer == null) throw new NullPointerException("buffer");
+        if (buffer == null)
+            throw new NullPointerException("buffer");
+
         int pos = buffer.position();
         int len = buffer.remaining();
         if (buffer.isDirect()) {
@@ -61,7 +59,7 @@ public final class RapidHash {
 
     private static void validateArray(byte[] data, int offset, int length) {
         if (data == null) throw new NullPointerException("data");
-        if (offset < 0 || length < 0 || offset + length > data.length) {
+        if (offset < 0 || length < 0 || offset > data.length - length) {
             throw new ArrayIndexOutOfBoundsException(
                     "offset=" + offset + " length=" + length + " array.length=" + data.length);
         }
