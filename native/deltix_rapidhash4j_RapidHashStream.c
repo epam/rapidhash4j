@@ -8,6 +8,8 @@
 #endif
 #include "rapidhash.h"
 
+/* Mirrors upstream V3 rapidhash_internal. See README.md for compatibility
+ * vectors and the upstream update procedure before changing the algorithm. */
 #define CHUNK_SIZE 112
 #define CHUNK_PREV 16
 
