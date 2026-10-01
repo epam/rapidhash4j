@@ -11,10 +11,6 @@ java {
     targetCompatibility = JavaVersion.VERSION_11
 }
 
-compileJava {
-    options.compilerArgs += ['-h', layout.buildDirectory.dir('generated/jni').get().asFile.absolutePath]
-}
-
 repositories {
     mavenCentral()
 }
@@ -25,93 +21,84 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
-// --- Platform detection ---
-ext {
-    def osName = System.getProperty('os.name').toLowerCase()
-    def osArch = System.getProperty('os.arch')
+def osName = System.getProperty('os.name').toLowerCase(Locale.ROOT)
+def nativeOs = osName.contains('linux') ? 'linux' :
+        osName.contains('mac') || osName.contains('darwin') ? 'darwin' :
+        osName.contains('win') ? 'windows' : null
+if (nativeOs == null) throw new GradleException("Unsupported OS: $osName")
 
-    if (osName.contains('linux')) {
-        nativeOs = 'linux'
-        nativeLibName = 'librapidhash4j.so'
-    } else if (osName.contains('mac') || osName.contains('darwin')) {
-        nativeOs = 'darwin'
-        nativeLibName = 'librapidhash4j.dylib'
-    } else if (osName.contains('win')) {
-        nativeOs = 'windows'
-        nativeLibName = 'rapidhash4j.dll'
-    } else {
-        throw new GradleException("Unsupported OS: $osName")
-    }
+def osArch = System.getProperty('os.arch')
+def nativeArch = [amd64: 'x86_64', x86_64: 'x86_64', aarch64: 'aarch64', arm64: 'aarch64'][osArch]
+if (nativeArch == null) throw new GradleException("Unsupported arch: $osArch")
 
-    if (osArch == 'amd64' || osArch == 'x86_64') {
-        nativeArch = 'x86_64'
-    } else if (osArch == 'aarch64' || osArch == 'arm64') {
-        nativeArch = 'aarch64'
-    } else {
-        throw new GradleException("Unsupported arch: $osArch")
-    }
+def nativePlatform = "${nativeOs}-${nativeArch}"
+def nativeLibName = System.mapLibraryName('rapidhash4j')
+def nativeLibDir = layout.buildDirectory.dir("native/${nativePlatform}")
+def nativeLib = nativeLibDir.map { it.file(nativeLibName) }
+def nativeResourceRoot = 'deltix/rapidhash4j/native'
+def nativeResourcePath = "${nativeResourceRoot}/${nativePlatform}"
+def nativeSources = fileTree('native') { include 'deltix_*.c' }
+def rapidHashHeaders = layout.projectDirectory.dir('native/rapidhash')
+def jniIncludes = tasks.named('compileJava', JavaCompile).flatMap { it.javaCompiler }
+        .map { it.metadata.installationPath.dir('include') }
+def jniPlatformIncludes = jniIncludes.map { it.dir(nativeOs == 'windows' ? 'win32' : nativeOs) }
 
-    nativePlatform = "${nativeOs}-${nativeArch}"
+def compileNative = tasks.register('compileNative', Exec) {
+    dependsOn tasks.named('compileJava')
+    inputs.files nativeSources
+    inputs.file rapidHashHeaders.file('rapidhash.h')
+    inputs.file jniIncludes.map { it.file('jni.h') }
+    inputs.file jniPlatformIncludes.map { it.file('jni_md.h') }
+    outputs.file nativeLib
+    workingDir nativeLibDir
 
-    def javaHome = System.getProperty('java.home')
-    jniIncludeDir = "${javaHome}/include"
-    jniPlatformIncludeDir = "${javaHome}/include/${nativeOs == 'darwin' ? 'darwin' : nativeOs == 'windows' ? 'win32' : 'linux'}"
-}
-
-// --- Native build via direct compiler invocation ---
-def nativeLibDir = layout.buildDirectory.dir('native/lib').get().asFile
-def nativeResourceDir = file("src/main/resources/deltix/rapidhash4j/native/${nativePlatform}")
-
-tasks.register('compileNative', Exec) {
-    dependsOn compileJava
-    def sourceFile = file('native/deltix_rapidhash4j_RapidHash.c')
-    def outputLib = new File(nativeLibDir, nativeLibName)
-
-    inputs.file sourceFile
-    inputs.dir file('native/rapidhash')
-    outputs.file outputLib
-
-    doFirst { nativeLibDir.mkdirs() }
-
-    if (nativeOs == 'windows') {
-        commandLine 'cl', '/O2', '/DNDEBUG', '/DRAPIDHASH_UNROLLED', '/LD',
-                "/I${jniIncludeDir}", "/I${jniPlatformIncludeDir}",
-                "/I${file('native/rapidhash').absolutePath}",
-                "/Fe:${outputLib.absolutePath}",
-                sourceFile.absolutePath
-    } else {
-        def sharedFlag = nativeOs == 'darwin' ? '-dynamiclib' : '-shared'
-        commandLine 'cc', sharedFlag, '-fPIC', '-O3', '-DNDEBUG', '-DRAPIDHASH_UNROLLED',
-                '-Wall', '-Wextra', '-Wno-unused-parameter',
-                '-I', jniIncludeDir, '-I', jniPlatformIncludeDir,
-                '-I', file('native/rapidhash').absolutePath,
-                '-o', outputLib.absolutePath,
-                sourceFile.absolutePath
+    doFirst {
+        nativeLibDir.get().asFile.mkdirs()
+        def includeDirs = [jniIncludes.get().asFile,
+                           jniPlatformIncludes.get().asFile,
+                           rapidHashHeaders.asFile]
+        def sources = nativeSources.files.sort().collect { it.absolutePath }
+        def output = nativeLib.get().asFile.absolutePath
+        if (nativeOs == 'windows') {
+            commandLine(['cl', '/O2', '/DNDEBUG', '/DRAPIDHASH_UNROLLED', '/LD'] +
+                    includeDirs.collect { "/I${it.absolutePath}" } + ["/Fe:$output"] + sources)
+        } else {
+            def sharedFlag = nativeOs == 'darwin' ? '-dynamiclib' : '-shared'
+            commandLine(['cc', sharedFlag, '-fPIC', '-O3', '-DNDEBUG', '-DRAPIDHASH_UNROLLED',
+                         '-Wall', '-Wextra', '-Wno-unused-parameter'] +
+                    includeDirs.collectMany { ['-I', it.absolutePath] } + ['-o', output] + sources)
+        }
     }
 }
 
-tasks.register('copyNativeLib', Copy) {
-    dependsOn compileNative
-    from nativeLibDir
-    include "librapidhash4j.*", "rapidhash4j.dll"
-    into nativeResourceDir
+sourceSets.main.resources.exclude "${nativeResourceRoot}/**"
+
+tasks.named('processResources') {
+    from(compileNative) { into nativeResourcePath }
 }
 
-processResources.dependsOn copyNativeLib
+jar {
+    archiveClassifier = nativePlatform
+}
 
 test {
     useJUnitPlatform()
-    dependsOn compileNative
-    systemProperty 'java.library.path', nativeLibDir.absolutePath
 }
 
 jmh {
     warmupIterations = 3
-    iterations = 100
+    iterations = 10
     fork = 2
-    jvmArgs = ["-Djava.library.path=${nativeLibDir.absolutePath}"]
 }
 
-clean {
-    delete fileTree('src/main/resources/deltix/rapidhash4j/native')
+tasks.register('testPackagedJar', JavaExec) {
+    dependsOn jar, testClasses
+    def packagedJar = tasks.named('jar').flatMap { it.archiveFile }
+    classpath = files(packagedJar, sourceSets.test.output.classesDirs)
+    mainClass = 'deltix.rapidhash4j.PackagedJarSmokeCheck'
+    doFirst {
+        args packagedJar.get().asFile.absolutePath, "${nativeResourcePath}/${nativeLibName}"
+    }
 }
+
+tasks.named('check') { dependsOn tasks.named('testPackagedJar') }
