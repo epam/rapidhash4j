@@ -3,7 +3,7 @@ plugins {
     id 'me.champeau.jmh' version '0.7.3'
 }
 
-group = 'deltix.rapidhash4j'
+group = 'com.epam.deltix.rapidhash4j'
 version = '0.1.0-SNAPSHOT'
 
 java {
@@ -35,9 +35,9 @@ def nativePlatform = "${nativeOs}-${nativeArch}"
 def nativeLibName = System.mapLibraryName('rapidhash4j')
 def nativeLibDir = layout.buildDirectory.dir("native/${nativePlatform}")
 def nativeLib = nativeLibDir.map { it.file(nativeLibName) }
-def nativeResourceRoot = 'deltix/rapidhash4j/native'
+def nativeResourceRoot = 'com/epam/deltix/rapidhash4j/native'
 def nativeResourcePath = "${nativeResourceRoot}/${nativePlatform}"
-def nativeSources = fileTree('native') { include 'deltix_*.c' }
+def nativeSources = fileTree('native') { include 'com_epam_deltix_rapidhash4j_*.c' }
 def rapidHashHeaders = layout.projectDirectory.dir('native/rapidhash')
 def jniIncludes = tasks.named('compileJava', JavaCompile).flatMap { it.javaCompiler }
         .map { it.metadata.installationPath.dir('include') }
@@ -71,9 +71,10 @@ def compileNative = tasks.register('compileNative', Exec) {
     }
 }
 
-sourceSets.main.resources.exclude "${nativeResourceRoot}/**"
+sourceSets.main.resources.exclude '**/rapidhash4j/native/**'
 
 tasks.named('processResources') {
+    includeEmptyDirs = false
     from(compileNative) { into nativeResourcePath }
 }
 
@@ -95,7 +96,7 @@ tasks.register('testPackagedJar', JavaExec) {
     dependsOn jar, testClasses
     def packagedJar = tasks.named('jar').flatMap { it.archiveFile }
     classpath = files(packagedJar, sourceSets.test.output.classesDirs)
-    mainClass = 'deltix.rapidhash4j.PackagedJarSmokeCheck'
+    mainClass = 'com.epam.deltix.rapidhash4j.PackagedJarSmokeCheck'
     doFirst {
         args packagedJar.get().asFile.absolutePath, "${nativeResourcePath}/${nativeLibName}"
     }

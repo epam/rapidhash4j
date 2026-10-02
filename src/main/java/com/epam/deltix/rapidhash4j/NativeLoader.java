@@ -1,4 +1,4 @@
-package deltix.rapidhash4j;
+package com.epam.deltix.rapidhash4j;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -19,7 +19,7 @@ final class NativeLoader {
     }
 
     private static void doLoad() {
-        String override = System.getProperty("deltix.rapidhash4j.lib.path");
+        String override = System.getProperty("com.epam.deltix.rapidhash4j.lib.path");
         if (override != null) {
             System.load(override);
             return;
@@ -28,7 +28,7 @@ final class NativeLoader {
         String os = detectOs();
         String arch = detectArch();
         String libName = System.mapLibraryName("rapidhash4j");
-        String resourcePath = "/deltix/rapidhash4j/native/" + os + "-" + arch + "/" + libName;
+        String resourcePath = "/com/epam/deltix/rapidhash4j/native/" + os + "-" + arch + "/" + libName;
 
         try (InputStream in = NativeLoader.class.getResourceAsStream(resourcePath)) {
             if (in == null) {

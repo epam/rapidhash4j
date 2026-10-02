@@ -6,7 +6,7 @@
 #endif
 #include "rapidhash.h"
 
-JNIEXPORT jlong JNICALL Java_deltix_rapidhash4j_RapidHash_nativeHash(
+JNIEXPORT jlong JNICALL Java_com_epam_deltix_rapidhash4j_RapidHash_nativeHash(
     JNIEnv *env, jclass cls, jbyteArray data, jint offset, jint length, jlong seed)
 {
     (void)cls;
@@ -25,7 +25,7 @@ JNIEXPORT jlong JNICALL Java_deltix_rapidhash4j_RapidHash_nativeHash(
     return (jlong)result;
 }
 
-JNIEXPORT jlong JNICALL Java_deltix_rapidhash4j_RapidHash_nativeHashDirect(
+JNIEXPORT jlong JNICALL Java_com_epam_deltix_rapidhash4j_RapidHash_nativeHashDirect(
     JNIEnv *env, jclass cls, jobject buffer, jint offset, jint length, jlong seed)
 {
     (void)cls;

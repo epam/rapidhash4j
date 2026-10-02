@@ -169,7 +169,7 @@ static void stream_init(rapidhash_stream *s, uint64_t raw_seed) {
 
 /* --- JNI bindings --- */
 
-JNIEXPORT jlong JNICALL Java_deltix_rapidhash4j_RapidHashStream_nativeStreamInit(
+JNIEXPORT jlong JNICALL Java_com_epam_deltix_rapidhash4j_RapidHashStream_nativeStreamInit(
     JNIEnv *env, jclass cls, jlong seed)
 {
     (void)env; (void)cls;
@@ -179,7 +179,7 @@ JNIEXPORT jlong JNICALL Java_deltix_rapidhash4j_RapidHashStream_nativeStreamInit
     return (jlong)(uintptr_t)s;
 }
 
-JNIEXPORT void JNICALL Java_deltix_rapidhash4j_RapidHashStream_nativeStreamUpdate(
+JNIEXPORT void JNICALL Java_com_epam_deltix_rapidhash4j_RapidHashStream_nativeStreamUpdate(
     JNIEnv *env, jclass cls, jlong state, jbyteArray data, jint offset, jint length)
 {
     (void)cls;
@@ -190,7 +190,7 @@ JNIEXPORT void JNICALL Java_deltix_rapidhash4j_RapidHashStream_nativeStreamUpdat
     (*env)->ReleasePrimitiveArrayCritical(env, data, ptr, JNI_ABORT);
 }
 
-JNIEXPORT void JNICALL Java_deltix_rapidhash4j_RapidHashStream_nativeStreamUpdateDirect(
+JNIEXPORT void JNICALL Java_com_epam_deltix_rapidhash4j_RapidHashStream_nativeStreamUpdateDirect(
     JNIEnv *env, jclass cls, jlong state, jobject buffer, jint offset, jint length)
 {
     (void)cls;
@@ -200,7 +200,7 @@ JNIEXPORT void JNICALL Java_deltix_rapidhash4j_RapidHashStream_nativeStreamUpdat
     stream_write(s, (const uint8_t *)addr + offset, (size_t)length);
 }
 
-JNIEXPORT jlong JNICALL Java_deltix_rapidhash4j_RapidHashStream_nativeStreamFinish(
+JNIEXPORT jlong JNICALL Java_com_epam_deltix_rapidhash4j_RapidHashStream_nativeStreamFinish(
     JNIEnv *env, jclass cls, jlong state)
 {
     (void)env; (void)cls;
@@ -211,7 +211,7 @@ JNIEXPORT jlong JNICALL Java_deltix_rapidhash4j_RapidHashStream_nativeStreamFini
     return (jlong)result;
 }
 
-JNIEXPORT void JNICALL Java_deltix_rapidhash4j_RapidHashStream_nativeStreamReset(
+JNIEXPORT void JNICALL Java_com_epam_deltix_rapidhash4j_RapidHashStream_nativeStreamReset(
     JNIEnv *env, jclass cls, jlong state, jlong seed)
 {
     (void)env; (void)cls;
@@ -219,7 +219,7 @@ JNIEXPORT void JNICALL Java_deltix_rapidhash4j_RapidHashStream_nativeStreamReset
     stream_init(s, (uint64_t)seed);
 }
 
-JNIEXPORT void JNICALL Java_deltix_rapidhash4j_RapidHashStream_nativeStreamFree(
+JNIEXPORT void JNICALL Java_com_epam_deltix_rapidhash4j_RapidHashStream_nativeStreamFree(
     JNIEnv *env, jclass cls, jlong state)
 {
     (void)env; (void)cls;

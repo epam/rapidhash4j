@@ -1,4 +1,4 @@
-package deltix.rapidhash4j;
+package com.epam.deltix.rapidhash4j;
 
 import java.nio.ByteBuffer;
 

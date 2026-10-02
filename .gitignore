@@ -43,7 +43,7 @@ bin/
 .DS_Store
 
 ### Native build artifacts ###
-src/main/resources/deltix/rapidhash4j/native/
+src/main/resources/**/rapidhash4j/native/
 *.o
 *.so
 *.dylib
