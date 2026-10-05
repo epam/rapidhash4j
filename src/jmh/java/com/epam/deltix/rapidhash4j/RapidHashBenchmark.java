@@ -1,4 +1,4 @@
-package deltix.rapidhash4j;
+package com.epam.deltix.rapidhash4j;
 
 import org.openjdk.jmh.annotations.*;
 
@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit;
 @OutputTimeUnit(TimeUnit.SECONDS)
 @State(Scope.Thread)
 @Warmup(iterations = 3, time = 1)
-@Measurement(iterations = 100, time = 1)
+@Measurement(iterations = 10, time = 1)
 @Fork(2)
 public class RapidHashBenchmark {
 
@@ -36,7 +36,6 @@ public class RapidHashBenchmark {
 
     @Benchmark
     public long rapidhashDirectBuffer() {
-        directBuffer.clear();
         return RapidHash.hash(directBuffer);
     }
 
