@@ -1,5 +1,6 @@
 plugins {
     id 'java-library'
+    id 'maven-publish'
 }
 
 group = 'com.epam.deltix.rapidhash4j'
@@ -8,121 +9,28 @@ version = '0.1.0-SNAPSHOT'
 java {
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
+    withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach { options.release = 11 }
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+        }
+    }
 }
 
 repositories {
     mavenCentral()
 }
 
-sourceSets {
-    jmh {
-        compileClasspath += sourceSets.main.output
-        runtimeClasspath += sourceSets.main.output
-    }
-}
-
 dependencies {
     testImplementation platform('org.junit:junit-bom:5.10.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-    jmhImplementation 'org.openjdk.jmh:jmh-core:1.36'
-    jmhAnnotationProcessor 'org.openjdk.jmh:jmh-generator-annprocess:1.36'
 }
 
-configurations.jmhImplementation.extendsFrom configurations.implementation
-configurations.jmhRuntimeOnly.extendsFrom configurations.runtimeOnly
-
-def osName = System.getProperty('os.name').toLowerCase(Locale.ROOT)
-def nativeOs = osName.contains('linux') ? 'linux' :
-        osName.contains('mac') || osName.contains('darwin') ? 'darwin' :
-        osName.contains('win') ? 'windows' : null
-if (nativeOs == null) throw new GradleException("Unsupported OS: $osName")
-
-def osArch = System.getProperty('os.arch')
-def nativeArch = [amd64: 'x86_64', x86_64: 'x86_64', aarch64: 'aarch64', arm64: 'aarch64'][osArch]
-if (nativeArch == null) throw new GradleException("Unsupported arch: $osArch")
-
-def nativePlatform = "${nativeOs}-${nativeArch}"
-def nativeLibName = System.mapLibraryName('rapidhash4j')
-def nativeLibDir = layout.buildDirectory.dir("native/${nativePlatform}")
-def nativeLib = nativeLibDir.map { it.file(nativeLibName) }
-def nativeResourceRoot = 'com/epam/deltix/rapidhash4j/native'
-def nativeResourcePath = "${nativeResourceRoot}/${nativePlatform}"
-def nativeSources = fileTree('native') { include 'com_epam_deltix_rapidhash4j_*.c' }
-def rapidHashHeaders = layout.projectDirectory.dir('native/rapidhash')
-def jniIncludes = tasks.named('compileJava', JavaCompile).flatMap { it.javaCompiler }
-        .map { it.metadata.installationPath.dir('include') }
-def jniPlatformIncludes = jniIncludes.map { it.dir(nativeOs == 'windows' ? 'win32' : nativeOs) }
-
-def compileNative = tasks.register('compileNative', Exec) {
-    dependsOn tasks.named('compileJava')
-    inputs.files nativeSources
-    inputs.file rapidHashHeaders.file('rapidhash.h')
-    inputs.file jniIncludes.map { it.file('jni.h') }
-    inputs.file jniPlatformIncludes.map { it.file('jni_md.h') }
-    outputs.file nativeLib
-    workingDir nativeLibDir
-
-    doFirst {
-        nativeLibDir.get().asFile.mkdirs()
-        def includeDirs = [jniIncludes.get().asFile,
-                           jniPlatformIncludes.get().asFile,
-                           rapidHashHeaders.asFile]
-        def sources = nativeSources.files.sort().collect { it.absolutePath }
-        def output = nativeLib.get().asFile.absolutePath
-        if (nativeOs == 'windows') {
-            commandLine(['cl', '/O2', '/DNDEBUG', '/DRAPIDHASH_UNROLLED', '/LD'] +
-                    includeDirs.collect { "/I${it.absolutePath}" } + ["/Fe:$output"] + sources)
-        } else {
-            def sharedFlag = nativeOs == 'darwin' ? '-dynamiclib' : '-shared'
-            commandLine(['cc', sharedFlag, '-fPIC', '-O3', '-DNDEBUG', '-DRAPIDHASH_UNROLLED',
-                         '-Wall', '-Wextra', '-Wno-unused-parameter'] +
-                    includeDirs.collectMany { ['-I', it.absolutePath] } + ['-o', output] + sources)
-        }
-    }
-}
-
-sourceSets.main.resources.exclude '**/rapidhash4j/native/**'
-
-tasks.named('processResources') {
-    includeEmptyDirs = false
-    from(compileNative) { into nativeResourcePath }
-}
-
-jar {
-    archiveClassifier = nativePlatform
-}
-
-test {
-    useJUnitPlatform()
-}
-
-tasks.register('jmhJar', Jar) {
-    archiveClassifier = 'jmh'
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    manifest { attributes 'Main-Class': 'com.epam.deltix.rapidhash4j.BenchmarkRunner' }
-    from sourceSets.jmh.output
-    from sourceSets.main.output
-    from({ configurations.jmhRuntimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }) {
-        exclude 'META-INF/MANIFEST.MF'
-    }
-}
-
-tasks.register('jmh', JavaExec) {
-    group = 'verification'
-    description = 'Runs JMH benchmarks.'
-    classpath = sourceSets.jmh.runtimeClasspath
-    mainClass = 'com.epam.deltix.rapidhash4j.BenchmarkRunner'
-}
-
-tasks.register('testPackagedJar', JavaExec) {
-    dependsOn jar, testClasses
-    def packagedJar = tasks.named('jar').flatMap { it.archiveFile }
-    classpath = files(packagedJar, sourceSets.test.output.classesDirs)
-    mainClass = 'com.epam.deltix.rapidhash4j.PackagedJarSmokeCheck'
-    doFirst {
-        args packagedJar.get().asFile.absolutePath, "${nativeResourcePath}/${nativeLibName}"
-    }
-}
-
-tasks.named('check') { dependsOn tasks.named('testPackagedJar') }
+apply from: 'gradle/native.gradle'
+apply from: 'gradle/jmh.gradle'

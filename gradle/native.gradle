@@ -1,0 +1,120 @@
+def osName = System.getProperty('os.name').toLowerCase(Locale.ROOT)
+def nativeOs = osName.contains('linux') ? 'linux' :
+        osName.contains('mac') || osName.contains('darwin') ? 'darwin' :
+        osName.contains('win') ? 'windows' : null
+if (nativeOs == null) throw new GradleException("Unsupported OS: $osName")
+
+def osArch = System.getProperty('os.arch')
+def nativeArch = [amd64: 'x86_64', x86_64: 'x86_64', aarch64: 'aarch64', arm64: 'aarch64'][osArch]
+if (nativeArch == null) throw new GradleException("Unsupported arch: $osArch")
+
+def nativePlatform = "${nativeOs}-${nativeArch}"
+def nativeLibName = System.mapLibraryName('rapidhash4j')
+def nativeLibDir = layout.buildDirectory.dir("native/${nativePlatform}")
+def nativeLib = nativeLibDir.map { it.file(nativeLibName) }
+def nativeResourceRoot = 'com/epam/deltix/rapidhash4j/native'
+def nativeResourcePath = "${nativeResourceRoot}/${nativePlatform}"
+def nativeBinariesDir = providers.gradleProperty('nativeBinariesDir')
+def packagedNativeFiles = ["${nativePlatform}/${nativeLibName}"]
+if (nativeBinariesDir.isPresent()) {
+    packagedNativeFiles = file('native/targets.tsv').readLines()
+            .findAll { it.trim() && !it.trim().startsWith('#') }
+            .collect { line ->
+                def fields = line.trim().split(/\s+/)
+                if (fields.length != 3) throw new GradleException("Invalid native target: ${line}")
+                "${fields[0]}/${fields[2]}".toString()
+            }
+    if (packagedNativeFiles.isEmpty() || packagedNativeFiles.toSet().size() != packagedNativeFiles.size()) {
+        throw new GradleException('Native targets must define a nonempty set of unique output paths')
+    }
+}
+def nativeSources = fileTree('native') { include 'com_epam_deltix_rapidhash4j_*.c' }
+def rapidHashHeaders = layout.projectDirectory.dir('native/rapidhash')
+def jniIncludes = tasks.named('compileJava', JavaCompile).flatMap { it.javaCompiler }
+        .map { it.metadata.installationPath.dir('include') }
+def jniPlatformIncludes = jniIncludes.map { it.dir(nativeOs == 'windows' ? 'win32' : nativeOs) }
+
+def compileNative = tasks.register('compileNative', Exec) {
+    dependsOn tasks.named('compileJava')
+    inputs.files nativeSources
+    inputs.file rapidHashHeaders.file('rapidhash.h')
+    inputs.file jniIncludes.map { it.file('jni.h') }
+    inputs.file jniPlatformIncludes.map { it.file('jni_md.h') }
+    outputs.file nativeLib
+    workingDir nativeLibDir
+
+    doFirst {
+        nativeLibDir.get().asFile.mkdirs()
+        def includeDirs = [jniIncludes.get().asFile,
+                           jniPlatformIncludes.get().asFile,
+                           rapidHashHeaders.asFile]
+        def sources = nativeSources.files.sort().collect { it.absolutePath }
+        def output = nativeLib.get().asFile.absolutePath
+        if (nativeOs == 'windows') {
+            commandLine(['cl', '/O2', '/DNDEBUG', '/DRAPIDHASH_UNROLLED', '/LD'] +
+                    includeDirs.collect { "/I${it.absolutePath}" } + ["/Fe:$output"] + sources)
+        } else {
+            def sharedFlag = nativeOs == 'darwin' ? '-dynamiclib' : '-shared'
+            commandLine(['cc', sharedFlag, '-fPIC', '-O3', '-DNDEBUG', '-DRAPIDHASH_UNROLLED',
+                         '-Wall', '-Wextra', '-Wno-unused-parameter'] +
+                    includeDirs.collectMany { ['-I', it.absolutePath] } + ['-o', output] + sources)
+        }
+    }
+}
+
+sourceSets.main.resources.exclude '**/rapidhash4j/native/**'
+
+if (nativeBinariesDir.isPresent()) {
+    tasks.register('validateNativeBinaries') {
+        doLast {
+            def binaries = file(nativeBinariesDir.get())
+            packagedNativeFiles.each { path ->
+                def binary = new File(binaries, path)
+                if (!binary.isFile() || binary.length() == 0) {
+                    throw new GradleException("Missing or empty native binary: ${binary}")
+                }
+            }
+        }
+    }
+}
+
+tasks.named('processResources') {
+    includeEmptyDirs = false
+    if (nativeBinariesDir.isPresent()) {
+        def binaries = file(nativeBinariesDir.get())
+        from(binaries) {
+            include packagedNativeFiles
+            into nativeResourceRoot
+        }
+        dependsOn tasks.named('validateNativeBinaries')
+    } else {
+        from(compileNative) { into nativeResourcePath }
+    }
+}
+
+jar {
+    archiveClassifier = nativeBinariesDir.isPresent() ? '' : nativePlatform
+}
+
+test {
+    useJUnitPlatform { excludeTags 'integration' }
+}
+
+tasks.register('integrationTest', Test) {
+    group = 'verification'
+    description = 'Checks packaged native libraries and native loader behavior.'
+    dependsOn jar, testClasses
+    useJUnitPlatform { includeTags 'integration' }
+    testClassesDirs = sourceSets.test.output.classesDirs
+    def packagedJar = tasks.named('jar').flatMap { it.archiveFile }
+    classpath = files(packagedJar, sourceSets.test.output) + configurations.testRuntimeClasspath
+    systemProperty 'rapidhash4j.test.hostResource', "${nativeResourcePath}/${nativeLibName}"
+    systemProperty 'rapidhash4j.test.nativeResources', packagedNativeFiles
+            .collect { "${nativeResourceRoot}/${it}" }.join('\n')
+    doFirst {
+        systemProperty 'rapidhash4j.test.jar', packagedJar.get().asFile.absolutePath
+        systemProperty 'rapidhash4j.test.classpath', classpath.asPath
+    }
+}
+
+tasks.named('check') { dependsOn tasks.named('integrationTest') }

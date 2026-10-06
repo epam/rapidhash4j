@@ -1,0 +1,33 @@
+sourceSets {
+    jmh {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+dependencies {
+    jmhImplementation 'org.openjdk.jmh:jmh-core:1.36'
+    jmhAnnotationProcessor 'org.openjdk.jmh:jmh-generator-annprocess:1.36'
+}
+
+configurations.jmhImplementation.extendsFrom configurations.implementation
+configurations.jmhRuntimeOnly.extendsFrom configurations.runtimeOnly
+
+tasks.register('jmhJar', Jar) {
+    archiveClassifier = 'jmh'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest { attributes 'Main-Class': 'com.epam.deltix.rapidhash4j.BenchmarkRunner' }
+    from sourceSets.jmh.output
+    from sourceSets.main.output
+    from({ configurations.jmhRuntimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }) {
+        exclude 'META-INF/MANIFEST.MF'
+    }
+}
+
+tasks.register('jmh', JavaExec) {
+    group = 'verification'
+    description = 'Runs JMH benchmarks.'
+    classpath = sourceSets.jmh.runtimeClasspath
+    mainClass = 'com.epam.deltix.rapidhash4j.BenchmarkRunner'
+}
+

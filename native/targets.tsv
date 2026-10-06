@@ -1,0 +1,9 @@
+# Resource directory	Zig target	Library filename
+linux-x86_64	x86_64-linux.2.6.32-gnu.2.17	librapidhash4j.so
+linux-aarch64	aarch64-linux.3.7-gnu.2.17	librapidhash4j.so
+linux-x86_64-musl	x86_64-linux-musl	librapidhash4j.so
+linux-aarch64-musl	aarch64-linux-musl	librapidhash4j.so
+darwin-x86_64	x86_64-macos	librapidhash4j.dylib
+darwin-aarch64	aarch64-macos	librapidhash4j.dylib
+windows-x86_64	x86_64-windows-gnu	rapidhash4j.dll
+windows-aarch64	aarch64-windows-gnu	rapidhash4j.dll
