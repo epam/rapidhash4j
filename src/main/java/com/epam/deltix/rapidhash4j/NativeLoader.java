@@ -27,9 +27,61 @@ final class NativeLoader {
 
         String os = detectOs();
         String arch = detectArch();
+        String libc = "linux".equals(os) ? detectLinuxLibc() : null;
         String libName = System.mapLibraryName("rapidhash4j");
-        String resourcePath = "/com/epam/deltix/rapidhash4j/native/" + os + "-" + arch + "/" + libName;
+        String resourceRoot = "/com/epam/deltix/rapidhash4j/native/" + os + "-" + arch;
+        String resourcePath = resourceRoot + ("musl".equals(libc) ? "-musl" : "") + "/" + libName;
 
+        try {
+            try {
+                loadResource(resourcePath, libName);
+            } catch (UnsatisfiedLinkError first) {
+                if (!"linux".equals(os) || libc != null) throw first;
+                resourcePath = resourceRoot + "-musl/" + libName;
+                try {
+                    loadResource(resourcePath, libName);
+                } catch (UnsatisfiedLinkError | IOException second) {
+                    first.addSuppressed(second);
+                    throw first;
+                }
+            }
+        } catch (IOException e) {
+            UnsatisfiedLinkError error = new UnsatisfiedLinkError(
+                    "Failed to extract native library " + resourcePath + ": " + e.getMessage());
+            error.initCause(e);
+            throw error;
+        }
+    }
+
+    static String detectLinuxLibc() {
+        try {
+            return detectLinuxLibc(Files.readString(Path.of("/proc/self/maps")));
+        } catch (IOException | SecurityException e) {
+            return null;
+        }
+    }
+
+    static String detectLinuxLibc(String maps) {
+        boolean musl = false;
+        boolean glibc = false;
+        var lines = maps.lines().iterator();
+        while (lines.hasNext()) {
+            String line = lines.next();
+            int slash = line.lastIndexOf('/');
+            if (slash < 0) continue;
+            String name = line.substring(slash + 1);
+            if (name.endsWith(" (deleted)")) {
+                name = name.substring(0, name.length() - " (deleted)".length());
+            }
+            musl |= (name.startsWith("ld-musl-") || name.startsWith("libc.musl-"))
+                    && (name.endsWith(".so") || name.endsWith(".so.1"));
+            glibc |= name.equals("libc.so.6")
+                    || (name.startsWith("libc-") && name.endsWith(".so"));
+        }
+        return musl == glibc ? null : musl ? "musl" : "glibc";
+    }
+
+    private static void loadResource(String resourcePath, String libName) throws IOException {
         try (InputStream in = NativeLoader.class.getResourceAsStream(resourcePath)) {
             if (in == null) {
                 throw new UnsatisfiedLinkError(
@@ -48,11 +100,6 @@ final class NativeLoader {
                 deleteAfterFailure(tempDir, error);
                 throw error;
             }
-        } catch (IOException e) {
-            UnsatisfiedLinkError error = new UnsatisfiedLinkError(
-                    "Failed to extract native library " + resourcePath + ": " + e.getMessage());
-            error.initCause(e);
-            throw error;
         }
     }
 

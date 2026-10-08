@@ -8,7 +8,14 @@ def osArch = System.getProperty('os.arch')
 def nativeArch = [amd64: 'x86_64', x86_64: 'x86_64', aarch64: 'aarch64', arm64: 'aarch64'][osArch]
 if (nativeArch == null) throw new GradleException("Unsupported arch: $osArch")
 
-def nativePlatform = "${nativeOs}-${nativeArch}"
+def processMaps = new File('/proc/self/maps')
+def nativeMusl = nativeOs == 'linux' && processMaps.canRead() && processMaps.readLines().any { line ->
+    def name = line.substring(line.lastIndexOf('/') + 1)
+    if (name.endsWith(' (deleted)')) name = name.substring(0, name.length() - ' (deleted)'.length())
+    (name.startsWith('ld-musl-') || name.startsWith('libc.musl-')) &&
+            (name.endsWith('.so') || name.endsWith('.so.1'))
+}
+def nativePlatform = "${nativeOs}-${nativeArch}" + (nativeMusl ? '-musl' : '')
 def nativeLibName = System.mapLibraryName('rapidhash4j')
 def nativeLibDir = layout.buildDirectory.dir("native/${nativePlatform}")
 def nativeLib = nativeLibDir.map { it.file(nativeLibName) }
