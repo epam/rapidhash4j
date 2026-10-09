@@ -6,11 +6,20 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RapidHashTest {
 
     private static final byte[] HELLO = "Hello, World!".getBytes(StandardCharsets.UTF_8);
     private static final byte[] QUICK_FOX = "The quick brown fox jumps over the lazy dog".getBytes(StandardCharsets.UTF_8);
+
+    @Test
+    void nativeLibraryIsAvailable() {
+        assertNull(RapidHash.loadError());
+        assertTrue(RapidHash.isAvailable());
+        assertEquals(0x75bff66af6ba4d5bL, RapidHash.hash(HELLO));
+    }
 
     @Test
     void hashEmpty() {

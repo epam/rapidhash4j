@@ -16,9 +16,7 @@ public final class RapidHashStream implements AutoCloseable {
     private long nativeState;
     private long seed;
 
-    static {
-        NativeLoader.load();
-    }
+    private static final Throwable LOAD_ERROR = NativeLoader.loadError();
 
     /** Creates an empty stream with seed zero. */
     public RapidHashStream() {
@@ -27,9 +25,11 @@ public final class RapidHashStream implements AutoCloseable {
 
     /**
      * Creates an empty stream with the given seed.
+     * @throws UnsatisfiedLinkError if the native library could not be loaded
      * @throws OutOfMemoryError if native state cannot be allocated
      */
     public RapidHashStream(long seed) {
+        if (LOAD_ERROR != null) throw NativeLoader.unavailable();
         nativeState = nativeStreamInit(seed);
         if (nativeState == 0) throw new OutOfMemoryError("Cannot allocate RapidHashStream native state");
         this.seed = seed;

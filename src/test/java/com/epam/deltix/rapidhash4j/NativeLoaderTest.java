@@ -7,6 +7,17 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 class NativeLoaderTest {
     @Test
+    void selectsMuslAndFallsBackOnlyWhenTheResourceIsMissing() {
+        String root = "/com/epam/deltix/rapidhash4j/native/linux-x86_64";
+        String name = "librapidhash4j.so";
+        String musl = root + "-musl/" + name;
+        assertEquals(musl, NativeLoader.selectResource(root, "musl", name, musl::equals));
+        assertEquals(root + "/" + name, NativeLoader.selectResource(root, "musl", name, path -> false));
+        assertEquals(root + "/" + name, NativeLoader.selectResource(root, "glibc", name, path -> true));
+        assertEquals(root + "/" + name, NativeLoader.selectResource(root, null, name, path -> true));
+    }
+
+    @Test
     void detectsMuslWithCompatibilityLibrary() {
         assertEquals("musl", NativeLoader.detectLinuxLibc(
                 "1000-2000 r-xp 00000000 00:01 1 /lib/libgcompat.so.0\n"

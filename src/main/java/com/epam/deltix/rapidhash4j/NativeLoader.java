@@ -5,39 +5,70 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.function.Predicate;
 
 final class NativeLoader {
 
-    private static boolean loaded;
+    private static int loadAttempts;
+    private static boolean completed;
+    private static UnsatisfiedLinkError failure;
 
     private NativeLoader() {}
 
-    static synchronized void load() {
-        if (loaded) return;
-        doLoad();
-        loaded = true;
+    static synchronized Throwable loadError() {
+        if (loadAttempts == 0) {
+            loadAttempts++;
+            failure = doLoad();
+            completed = true;
+        }
+        if (!completed) throw new IllegalStateException("Native loading did not complete");
+        return failure;
     }
 
-    private static void doLoad() {
-        String override = System.getProperty("com.epam.deltix.rapidhash4j.lib.path");
-        if (override != null) {
-            System.load(override);
-            return;
-        }
+    static synchronized int loadAttempts() {
+        return loadAttempts;
+    }
 
-        String os = detectOs();
-        String arch = detectArch();
-        String libc = "linux".equals(os) ? detectLinuxLibc() : null;
-        String libName = System.mapLibraryName("rapidhash4j");
-        String resourceRoot = "/com/epam/deltix/rapidhash4j/native/" + os + "-" + arch;
-        String resourcePath = resourceRoot + ("musl".equals(libc) ? "-musl" : "") + "/" + libName;
+    static UnsatisfiedLinkError unavailable() {
+        UnsatisfiedLinkError error = new UnsatisfiedLinkError(failure.getMessage());
+        error.initCause(failure);
+        return error;
+    }
 
+    private static UnsatisfiedLinkError doLoad() {
+        String osName = "unknown";
+        String arch = "unknown";
+        String libc = null;
+        String source = "not selected";
         try {
+            String override = System.getProperty("com.epam.deltix.rapidhash4j.lib.path");
+            if (override != null) source = "override " + override;
+            try {
+                osName = System.getProperty("os.name", "");
+                arch = System.getProperty("os.arch", "");
+            } catch (SecurityException denied) {
+                if (override == null) throw denied;
+            }
+            if (override != null) {
+                System.load(override);
+                return null;
+            }
+
+            String os = detectOs(osName);
+            String resourceRoot = "/com/epam/deltix/rapidhash4j/native/" + os + "-" + detectArch(arch);
+            libc = "linux".equals(os) ? detectLinuxLibc() : null;
+            String libName = System.mapLibraryName("rapidhash4j");
+            String resourcePath = selectResource(resourceRoot, libc, libName,
+                    path -> NativeLoader.class.getResource(path) != null);
+            source = resourcePath;
+            if ("musl".equals(libc) && !resourcePath.contains("-musl/")) source += " (glibc fallback)";
+
             try {
                 loadResource(resourcePath, libName);
             } catch (UnsatisfiedLinkError first) {
                 if (!"linux".equals(os) || libc != null) throw first;
                 resourcePath = resourceRoot + "-musl/" + libName;
+                source += " then " + resourcePath;
                 try {
                     loadResource(resourcePath, libName);
                 } catch (UnsatisfiedLinkError | IOException second) {
@@ -45,12 +76,26 @@ final class NativeLoader {
                     throw first;
                 }
             }
-        } catch (IOException e) {
-            UnsatisfiedLinkError error = new UnsatisfiedLinkError(
-                    "Failed to extract native library " + resourcePath + ": " + e.getMessage());
-            error.initCause(e);
-            throw error;
+            return null;
+        } catch (IOException | UnsatisfiedLinkError | SecurityException error) {
+            Throwable original = error;
+            if (error instanceof IOException) {
+                UnsatisfiedLinkError extractionError = new UnsatisfiedLinkError(
+                        "Failed to extract native library " + source + ": " + error.getMessage());
+                extractionError.initCause(error);
+                original = extractionError;
+            }
+            UnsatisfiedLinkError diagnostic = new UnsatisfiedLinkError(
+                    "Failed to load native library " + source + " (os=" + osName
+                            + ", arch=" + arch + ", detected libc=" + libc + "): " + original.getMessage());
+            diagnostic.initCause(original);
+            return diagnostic;
         }
+    }
+
+    static String selectResource(String resourceRoot, String libc, String libName, Predicate<String> exists) {
+        String musl = resourceRoot + "-musl/" + libName;
+        return "musl".equals(libc) && exists.test(musl) ? musl : resourceRoot + "/" + libName;
     }
 
     static String detectLinuxLibc() {
@@ -111,16 +156,15 @@ final class NativeLoader {
         }
     }
 
-    private static String detectOs() {
-        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+    private static String detectOs(String osName) {
+        String os = osName.toLowerCase(Locale.ROOT);
         if (os.contains("linux")) return "linux";
         if (os.contains("mac") || os.contains("darwin")) return "darwin";
         if (os.contains("win")) return "windows";
         throw new UnsatisfiedLinkError("Unsupported OS: " + os);
     }
 
-    private static String detectArch() {
-        String arch = System.getProperty("os.arch", "");
+    private static String detectArch(String arch) {
         if ("amd64".equals(arch) || "x86_64".equals(arch)) return "x86_64";
         if ("aarch64".equals(arch) || "arm64".equals(arch)) return "aarch64";
         throw new UnsatisfiedLinkError("Unsupported architecture: " + arch);
