@@ -1,15 +1,19 @@
 plugins {
     id 'java-library'
     id 'maven-publish'
+    id 'signing'
+    id 'com.gradleup.nmcp' version '1.6.2'
+    id 'com.gradleup.nmcp.aggregation' version '1.6.2'
 }
 
 group = 'com.epam.deltix.rapidhash4j'
-version = '0.1.0-SNAPSHOT'
+version = findProperty('releaseVersion') ?: providers.gradleProperty('version').get()
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
     withSourcesJar()
+    withJavadocJar()
 }
 
 tasks.withType(JavaCompile).configureEach { options.release = 11 }
@@ -34,3 +38,4 @@ dependencies {
 
 apply from: 'gradle/native.gradle'
 apply from: 'gradle/jmh.gradle'
+apply from: 'gradle/publishing.gradle'

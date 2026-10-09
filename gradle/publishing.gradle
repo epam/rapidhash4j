@@ -1,0 +1,73 @@
+tasks.withType(Jar).configureEach {
+    from(rootProject.file('LICENSE')) { into 'META-INF' }
+    from(rootProject.file('native/rapidhash/LICENSE')) {
+        into 'META-INF'
+        rename { 'rapidhash-LICENSE' }
+    }
+}
+
+MavenPublication mavenJava = publishing.publications.getByName('mavenJava') as MavenPublication
+mavenJava.pom {
+    name = 'rapidhash4j'
+    description = 'Java bindings for native rapidhash library.'
+    url = 'https://github.com/epam/rapidhash4j'
+
+    scm {
+        connection = 'scm:git:https://github.com/epam/rapidhash4j.git'
+        developerConnection = 'scm:git:ssh://git@github.com/epam/rapidhash4j.git'
+        url = 'https://github.com/epam/rapidhash4j'
+    }
+
+    licenses {
+        license {
+            name = 'Apache License, Version 2.0'
+            url = 'https://www.apache.org/licenses/LICENSE-2.0.txt'
+            distribution = 'repo'
+        }
+    }
+
+    developers {
+        developer {
+            id = 'TyomaVader'
+            name = 'Artsiom Chmutau'
+            email = 'artsiom_chmutau@epam.com'
+            url = 'https://github.com/TyomaVader'
+            organization = 'EPAM Systems'
+            organizationUrl = 'https://www.epam.com/'
+        }
+    }
+}
+
+signing {
+    required = providers.gradleProperty('releaseVersion').isPresent()
+    def key = System.getenv('SIGNING_KEY')
+    if (key) {
+        useInMemoryPgpKeys(key, System.getenv('SIGNING_PASSWORD'))
+    }
+    sign mavenJava
+}
+
+dependencies { nmcpAggregation project(':') }
+
+nmcpAggregation {
+    centralPortal({ portal ->
+        portal.username.set(providers.environmentVariable('CENTRAL_USERNAME'))
+        portal.password.set(providers.environmentVariable('CENTRAL_PASSWORD'))
+        portal.publishingType.set(providers.gradleProperty('centralPublishingType').orElse('AUTOMATIC'))
+        portal.validationTimeout.set(java.time.Duration.ofMinutes(20))
+        if (portal.publishingType.get() == 'AUTOMATIC') {
+            portal.publishingTimeout.set(java.time.Duration.ofMinutes(30))
+        }
+    } as Action)
+}
+
+tasks.named('nmcpPublishAggregationToCentralPortal') {
+    dependsOn tasks.named('check')
+    doFirst {
+        if (!providers.gradleProperty('releaseVersion').isPresent() ||
+                version.toString().endsWith('-SNAPSHOT') ||
+                !providers.gradleProperty('nativeBinariesDir').isPresent()) {
+            throw new GradleException('Central releases require -PreleaseVersion and -PnativeBinariesDir for all targets')
+        }
+    }
+}
