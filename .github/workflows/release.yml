@@ -117,7 +117,7 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           mkdir -p build/release
-          publication="com/epam/deltix/rapidhash4j/rapidhash4j/$RELEASE_VERSION"
+          publication="com/epam/deltix/rapidhash4j/$RELEASE_VERSION"
           unzip -j build/nmcp/zip/aggregation.zip \
             "$publication/*.jar" "$publication/*.jar.asc" \
             "$publication/*.pom" "$publication/*.pom.asc" \

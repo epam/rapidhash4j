@@ -6,7 +6,7 @@ plugins {
     id 'com.gradleup.nmcp.aggregation' version '1.6.2'
 }
 
-group = 'com.epam.deltix.rapidhash4j'
+group = 'com.epam.deltix'
 version = findProperty('releaseVersion') ?: providers.gradleProperty('version').get()
 
 java {
