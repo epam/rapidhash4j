@@ -1,0 +1,193 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: maven-central
+    timeout-minutes: 90
+    env:
+      ZIG_VERSION: '0.17.0'
+      ZIG_SHA256: '1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026'
+    steps:
+      - name: Check out release sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Select and validate release version
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          [[ "$GITHUB_REF" == "refs/heads/$DEFAULT_BRANCH" ]] || {
+            echo 'Releases must be dispatched from the default branch' >&2; exit 1;
+          }
+          [[ "$(git rev-parse HEAD)" == "$(git rev-parse "origin/$DEFAULT_BRANCH")" ]] || {
+            echo 'Default branch advanced before checkout; start a fresh run' >&2; exit 1;
+          }
+          development_version="$(sed -n 's/^version=//p' gradle.properties)"
+          [[ "$development_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-SNAPSHOT$ ]] || {
+            echo 'Expected version=X.Y.Z-SNAPSHOT in gradle.properties' >&2; exit 1;
+          }
+          version="${development_version%-SNAPSHOT}"
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "Release tag $tag already exists" >&2
+            exit 1
+          fi
+          releases="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '.[].tag_name')"
+          if grep -Fxq "$tag" <<< "$releases"; then
+            echo "GitHub release $tag already exists" >&2
+            exit 1
+          fi
+          echo "Releasing $version ($tag)"
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Java
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - name: Install Zig and binary inspection tools
+        run: |
+          test "$(uname -m)" = x86_64
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl xz-utils unzip file binutils
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/zig.tar.xz" \
+            "https://ziglang.org/download/$ZIG_VERSION/zig-x86_64-linux-$ZIG_VERSION.tar.xz"
+          printf '%s  %s\n' "$ZIG_SHA256" "$RUNNER_TEMP/zig.tar.xz" | sha256sum --check
+          tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
+          zig="$RUNNER_TEMP/zig-x86_64-linux-$ZIG_VERSION/zig"
+          test "$("$zig" version)" = "$ZIG_VERSION"
+          echo "ZIG=$zig" >> "$GITHUB_ENV"
+
+      - name: Build and verify all native targets
+        run: |
+          bash scripts/build-natives.sh
+          bash scripts/verify-natives.sh
+
+      - name: Build all-native JAR and run tests
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ./gradlew --no-daemon -PnativeBinariesDir=build/native-binaries \
+            "-PreleaseVersion=$RELEASE_VERSION" build \
+            generatePomFileForMavenJavaPublication generateMetadataFileForMavenJavaPublication
+
+      - name: Sign, publish to Maven Central and wait for publication
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+        run: |
+          mkdir -p build/reports/release
+          ./gradlew --no-daemon -PnativeBinariesDir=build/native-binaries \
+            "-PreleaseVersion=$RELEASE_VERSION" -PcentralPublishingType=AUTOMATIC \
+            publishAggregationToCentralPortal 2>&1 | tee build/reports/release/publish.log
+
+      - name: Prepare release assets
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p build/release
+          publication="com/epam/deltix/rapidhash4j/rapidhash4j/$RELEASE_VERSION"
+          unzip -j build/nmcp/zip/aggregation.zip \
+            "$publication/*.jar" "$publication/*.jar.asc" \
+            "$publication/*.pom" "$publication/*.pom.asc" \
+            "$publication/*.module" "$publication/*.module.asc" -d build/release
+          (cd build/release && sha256sum -- *.jar *.pom *.module *.asc > SHA256SUMS)
+
+      - name: Create draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$RELEASE_TAG" build/release/* \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --draft --generate-notes --title "$RELEASE_TAG"
+
+      - name: Save outputs and reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            build/native-binaries/
+            build/libs/*.jar
+            build/publications/mavenJava/
+            build/nmcp/zip/aggregation.zip
+            build/release/
+            build/reports/tests/
+            build/test-results/
+            build/reports/release/
+
+  next-development-version:
+    name: Advance development version after release publication
+    if: github.event_name == 'release' && github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Commit next development version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+            echo 'Expected a stable release tag such as v0.1.0' >&2; exit 1;
+          }
+          next_version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))-SNAPSHOT"
+          development_version="${RELEASE_TAG#v}-SNAPSHOT"
+          gh auth setup-git
+          git fetch origin "$DEFAULT_BRANCH"
+          git switch -c next-development-version "origin/$DEFAULT_BRANCH"
+          current_version="$(sed -n 's/^version=//p' gradle.properties)"
+          if [[ "$current_version" == "$next_version" ]]; then
+            echo "Development version is already $next_version"
+            exit 0
+          fi
+          [[ "$current_version" == "$development_version" ]] || {
+            echo 'Development version changed since this release; update it manually' >&2; exit 1;
+          }
+          sed "s/^version=.*/version=$next_version/" gradle.properties > "$RUNNER_TEMP/gradle.properties"
+          mv "$RUNNER_TEMP/gradle.properties" gradle.properties
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add gradle.properties
+          git commit -m "Prepare next development version $next_version"
+          git push origin "HEAD:refs/heads/$DEFAULT_BRANCH"
