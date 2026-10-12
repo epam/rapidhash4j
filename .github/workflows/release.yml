@@ -152,9 +152,12 @@ jobs:
             build/reports/release/
 
   next-development-version:
-    name: Advance development version after release publication
+    name: Propose next development version after release publication
     if: github.event_name == 'release' && github.event.release.prerelease == false
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Check out the default branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -163,7 +166,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Commit next development version
+      - name: Open next development version pull request
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -174,9 +178,10 @@ jobs:
           }
           next_version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))-SNAPSHOT"
           development_version="${RELEASE_TAG#v}-SNAPSHOT"
+          bump_branch="chore/next-development-version-$RELEASE_TAG"
           gh auth setup-git
           git fetch origin "$DEFAULT_BRANCH"
-          git switch -c next-development-version "origin/$DEFAULT_BRANCH"
+          git switch --detach "origin/$DEFAULT_BRANCH"
           current_version="$(sed -n 's/^version=//p' gradle.properties)"
           if [[ "$current_version" == "$next_version" ]]; then
             echo "Development version is already $next_version"
@@ -185,10 +190,29 @@ jobs:
           [[ "$current_version" == "$development_version" ]] || {
             echo 'Development version changed since this release; update it manually' >&2; exit 1;
           }
-          sed "s/^version=.*/version=$next_version/" gradle.properties > "$RUNNER_TEMP/gradle.properties"
-          mv "$RUNNER_TEMP/gradle.properties" gradle.properties
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add gradle.properties
-          git commit -m "Prepare next development version $next_version"
-          git push origin "HEAD:refs/heads/$DEFAULT_BRANCH"
+          existing_branch="$(git ls-remote --heads origin "$bump_branch")"
+          if [[ -z "$existing_branch" ]]; then
+            git switch -c "$bump_branch"
+            sed "s/^version=.*/version=$next_version/" gradle.properties > "$RUNNER_TEMP/gradle.properties"
+            mv "$RUNNER_TEMP/gradle.properties" gradle.properties
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add gradle.properties
+            git commit -m "Prepare next development version $next_version"
+            git push origin "HEAD:refs/heads/$bump_branch"
+          else
+            git fetch origin "$bump_branch"
+            branch_version="$(git show FETCH_HEAD:gradle.properties | sed -n 's/^version=//p')"
+            [[ "$branch_version" == "$next_version" ]] || {
+              echo 'Version-bump branch has an unexpected version; update it manually' >&2; exit 1;
+            }
+          fi
+          existing_pr="$(gh pr list --repo "$GITHUB_REPOSITORY" --base "$DEFAULT_BRANCH" \
+            --head "$bump_branch" --state open --json url --jq '.[0].url // empty')"
+          if [[ -n "$existing_pr" ]]; then
+            echo "Version-bump pull request already exists: $existing_pr"
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" --base "$DEFAULT_BRANCH" --head "$bump_branch" \
+              --title "Prepare next development version $next_version" \
+              --body "Advance the development version to $next_version after publishing $RELEASE_TAG."
+          fi
