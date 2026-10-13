@@ -1,0 +1,88 @@
+name: Test packaged JAR
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: 'Release workflow run ID from its Actions URL'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release-artifact:
+    name: Select release artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      id: ${{ steps.release.outputs.id }}
+    steps:
+      - name: Select the retained release artifact
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+        run: |
+          [[ "$RELEASE_RUN_ID" =~ ^[1-9][0-9]*$ ]] || {
+            echo 'Expected a numeric release workflow run ID' >&2; exit 1;
+          }
+          workflow="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN_ID" \
+            --jq 'select(.event == "workflow_dispatch" and .status == "completed") | (.path | split("@")[0])')"
+          [[ "$workflow" == '.github/workflows/release.yml' ]] || {
+            echo 'Expected a completed manual Release workflow run' >&2; exit 1;
+          }
+          artifact_id="$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN_ID/artifacts" \
+            --jq "[.[].artifacts[] | select(.expired == false and (.name | startswith(\"release-$RELEASE_RUN_ID-\")))] | max_by(.created_at) | .id // empty")"
+          [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]] || {
+            echo 'No retained release artifact found; release artifacts expire after 14 days' >&2; exit 1;
+          }
+          echo "id=$artifact_id" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Load packaged JAR on ${{ matrix.os }}
+    needs: release-artifact
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Download the release artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.release-artifact.outputs.id }}
+          run-id: ${{ inputs.release_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/release-artifact
+
+      - name: Verify native loading and hashing from the JAR
+        run: |
+          shopt -s nullglob
+          jars=()
+          for jar in "$RUNNER_TEMP/release-artifact/libs/"*.jar; do
+            case "$jar" in
+              *-sources.jar|*-javadoc.jar|*-jmh.jar) continue ;;
+            esac
+            jars+=("$jar")
+          done
+          [[ ${#jars[@]} -eq 1 ]] || {
+            echo "Expected one release JAR, found ${#jars[@]}" >&2; exit 1;
+          }
+          java -cp "${jars[0]}" src/test/java/com/epam/deltix/rapidhash4j/PackagedJarSmokeTest.java "${jars[0]}"

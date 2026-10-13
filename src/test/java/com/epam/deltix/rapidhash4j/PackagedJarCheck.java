@@ -28,16 +28,7 @@ public final class PackagedJarCheck {
                 throw new AssertionError("Unexpected packaged native files: " + binaries);
             }
         }
-        Path loadedFrom = Path.of(RapidHash.class.getProtectionDomain()
-                .getCodeSource().getLocation().toURI()).toRealPath();
-        if (!artifact.equals(loadedFrom)) {
-            throw new AssertionError("Hash classes loaded from " + loadedFrom + " instead of " + artifact);
-        }
-        byte[] data = new byte[256];
-        for (int i = 0; i < data.length; i++) data[i] = (byte) i;
-        if (RapidHash.hash(data) != 0xa2f383f4b9260b9dL) {
-            throw new AssertionError("Packaged hash mismatch");
-        }
+        PackagedJarSmokeTest.main(new String[] {artifact.toString()});
         System.out.println("Packaged native loading verified: " + System.getProperty("rapidhash4j.test.hostResource"));
     }
 }
