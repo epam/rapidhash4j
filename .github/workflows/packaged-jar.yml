@@ -38,8 +38,9 @@ jobs:
           [[ "$workflow" == '.github/workflows/release.yml' ]] || {
             echo 'Expected a completed manual Release workflow run' >&2; exit 1;
           }
-          artifact_id="$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN_ID/artifacts" \
-            --jq "[.[].artifacts[] | select(.expired == false and (.name | startswith(\"release-$RELEASE_RUN_ID-\")))] | max_by(.created_at) | .id // empty")"
+          artifact_id="$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN_ID/artifacts" |
+            jq -r --arg prefix "release-$RELEASE_RUN_ID-" \
+              '[.[].artifacts[] | select(.expired == false and (.name | startswith($prefix)))] | max_by(.created_at) | .id // empty')"
           [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]] || {
             echo 'No retained release artifact found; release artifacts expire after 14 days' >&2; exit 1;
           }
